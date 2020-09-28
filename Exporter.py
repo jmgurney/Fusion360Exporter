@@ -4,7 +4,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import NamedTuple, List, Set
 from enum import Enum
-from dataclasses import dataclass
 import hashlib
 import re
 
@@ -40,12 +39,12 @@ FormatFromName = {x.value: x for x in Format}
 DEFAULT_SELECTED_FORMATS = {Format.F3D, Format.STEP}
 
 class Ctx(NamedTuple):
-    folder: Path
-    formats: List[Format]
-    app: adsk.core.Application
-    projects: Set[str]
-    unhide_all: bool
-    save_sketches: bool
+    #folder: Path
+    #formats: List[Format]
+    #app: adsk.core.Application
+    #projects: Set[str]
+    #unhide_all: bool
+    #save_sketches: bool
 
     def extend(self, other):
         return self._replace(folder=self.folder / other)
@@ -59,7 +58,7 @@ class LazyDocument:
     def open(self):
         if self._document is not None:
             return
-        log(f'Opening `{self._file.name}`')
+        log('Opening `%s`' % repr(self._file.name))
         self._document = self._ctx.app.documents.open(self._file)
         self._document.activate()
 
@@ -69,7 +68,7 @@ class LazyDocument:
     def close(self):
         if self._document is None:
             return
-        log(f'Closing {self._file.name}')
+        log('Closing `%s`' % repr(self._file.name))
         self._document.close(False)  # don't save changes
 
     @property
@@ -80,11 +79,11 @@ class LazyDocument:
     def rootComponent(self):
         return self.design.rootComponent
 
-@dataclass
 class Counter:
-    saved: int = 0
-    skipped: int = 0
-    errored: int = 0
+    def __init__(self, saved=0, skipped=0, errored=0):
+        self.saved = saved
+        self.skipped = skipped
+        self.errored = errored
 
     def __add__(self, other):
         return Counter(
@@ -131,24 +130,24 @@ def sanitize_filename(name: str) -> str:
     with_replacement = re.sub(r'[:\\/*?<>|]', ' ', name)
     if name == with_replacement:
         return name
-    log(f'filename `{name}` contained bad chars, replacing by `{with_replacement}`')
+    log('filename `%s` contained bad chars, replacing by `%s`' % (repr(name), repr(with_replacement)))
     hash = hashlib.sha256(name.encode()).hexdigest()[:8]
-    return f'{with_replacement}_{hash}'
+    return with_replacement + '_' + hash
 
 def export_filename(ctx: Ctx, format: Format, file):
     sanitized = sanitize_filename(file.name)
-    name = f'{sanitized}_v{file.versionNumber}.{format.value}'
+    name = sanitized +'_v' + file.versionNumber + '.' + format.value
     return ctx.folder / name
 
 def export_sketches(ctx, component):
     counter = Counter()
     for sketch in component.sketches:
-        output_path = ctx.folder / f'{sanitize_filename(sketch.name)}.dxf'
+        output_path = ctx.folder / (sanitize_filename(sketch.name) +'.dxf')
         if output_path.exists():
-            log(f'{output_path} already exists, skipping')
+            log('%s already exists, skipping' % repr(output_path))
             counter.skipped += 1
         else:
-            log(f'Exporting sketch {sketch.name} in {component.name} to {output_path}')
+            log('Exporting sketch ' + sketch.name + ' in ' + component.name + ' to ' + output_path)
             try:
                 output_path.parent.mkdir(exist_ok=True, parents=True)
                 sketch.saveAsDXF(str(output_path))
@@ -165,7 +164,7 @@ def export_sketches(ctx, component):
 def export_file(ctx: Ctx, format: Format, file, doc: LazyDocument) -> Counter:
     output_path = export_filename(ctx, format, file)
     if output_path.exists():
-        log(f'{output_path} already exists, skipping')
+        log(output_path + ' already exists, skipping')
         return Counter(skipped=1)
 
     doc.open()
@@ -191,18 +190,18 @@ def export_file(ctx: Ctx, format: Format, file, doc: LazyDocument) -> Counter:
     elif format == Format.SMT:
         options = em.createSMTExportOptions(str(output_path))
     else:
-        raise Exception(f'Got unknown export format {format}')
+        raise Exception('Got unknown export format ' + format)
 
     em.execute(options)
-    log(f'Saved {output_path}')
+    log('Saved ' + output_path)
     
     return Counter(saved=1)
 
 def visit_file(ctx: Ctx, file) -> Counter:
-    log(f'Visiting file {file.name} v{file.versionNumber} . {file.fileExtension}')
+    log('Visiting file ' + file.name + ' v' + file.versionNumber + ' . ' + file.fileExtension)
 
     if file.fileExtension != 'f3d':
-        log(f'file {file.name} has extension {file.fileExtension} which is not currently handled, skipping')
+        log('file ' + file.name + ' has extension ' + file.fileExtension + ' which is not currently handled, skipping')
         return Counter(skipped=1)
 
     doc = LazyDocument(ctx, file)
@@ -224,7 +223,7 @@ def visit_file(ctx: Ctx, file) -> Counter:
     return counter
 
 def visit_folder(ctx: Ctx, folder) -> Counter:
-    log(f'Visiting folder {folder.name}')
+    log('Visiting folder ' + folder.name)
 
     new_ctx = ctx.extend(sanitize_filename(folder.name))
 
@@ -234,7 +233,7 @@ def visit_folder(ctx: Ctx, folder) -> Counter:
         try:
             counter += visit_file(new_ctx, file)
         except Exception:
-            log(f'Got exception visiting file\n{traceback.format_exc()}')
+            log('Got exception visiting file\n' + traceback.format_exc())
             counter.errored += 1
 
     for sub_folder in folder.dataFolders:
@@ -318,17 +317,17 @@ class ExporterCommandExecuteHandler(adsk.core.CommandEventHandler):
             counter = main(ctx)
 
             ui.messageBox('\n'.join((
-                f'Saved {counter.saved} files',
-                f'Skipped {counter.skipped} files',
-                f'Encountered {counter.errored} errors',
-                f'Log file is at {log_file}'
+                'Saved ' + counter.saved + ' files',
+                'Skipped ' + counter.skipped + ' files',
+                'Encountered ' + counter.errored + ' errors',
+                'Log file is at ' + log_file + ''
             )))
 
         except:
             tb = traceback.format_exc()
-            adsk.core.Application.get().userInterface.messageBox(f'Log file is at {log_file}\n{tb}')
+            adsk.core.Application.get().userInterface.messageBox('Log file is at ' + log_file + '\n' + tb)
             if log_fh is not None:
-                log(f'Got top level exception\n{tb}')    
+                log('Got top level exception\n' + tb)    
         finally:
             if log_fh is not None:
                 log_fh.close()
